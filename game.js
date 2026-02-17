@@ -110,6 +110,9 @@ function initPeer(destId) {
         console.log('My ID: ' + id);
 
         if (isHost) {
+            // Generate seed and initialize Host's board immediately
+            const seed = Math.floor(Math.random() * 1000000);
+            initGame(seed);
             showWaitingModal();
         } else if (destId) {
             connectToPeer(destId);
