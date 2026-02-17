@@ -582,7 +582,14 @@ updateQuestionValues();
 
 btnAskQuestion.addEventListener("click", () => {
     if (!conn && !isHost) { alert("¡No estás conectado!"); return; }
-    if (!canAsk) { alert("¡Espera tu turno!"); return; }
+    if (!canAsk) {
+        if (isHost && gameState === "SELECTING") {
+            alert("El juego no ha comenzado.");
+        } else {
+            alert("¡Espera tu turno!");
+        }
+        return;
+    }
 
     const type = questionTypeSelect.value;
     const val = questionValueSelect.value;
