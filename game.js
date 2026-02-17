@@ -194,8 +194,30 @@ btnCancelHost.onclick = () => {
 };
 
 function connectToPeer(destId) {
-    statusText.textContent = "Conectando a " + destId + "...";
-    conn = peer.connect(destId);
+    statusText.textContent = "Intentando conectar con " + destId + "...";
+    conn = peer.connect(destId, {
+        reliable: true
+    });
+
+    // Timeout check
+    const connectionTimeout = setTimeout(() => {
+        if (!conn || !conn.open) {
+            statusText.textContent = "La conexión está tardando...";
+            // alert("La conexión está tardando. Verifica el ID o intenta de nuevo.");
+        }
+    }, 5000);
+
+    conn.on('open', () => {
+        clearTimeout(connectionTimeout);
+        statusText.textContent = "¡Conectado! Esperando datos...";
+        console.log("Connected to: " + destId);
+    });
+
+    conn.on('error', (err) => {
+        console.error("Connection Error: ", err);
+        alert("Error en la conexión con el Host.");
+    });
+
     setupJoinerConnection();
 }
 

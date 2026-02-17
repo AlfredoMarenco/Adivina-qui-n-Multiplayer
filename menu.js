@@ -3,6 +3,7 @@ document.getElementById('btnSingle').addEventListener('click', () => {
 });
 
 document.getElementById('btnHost').addEventListener('click', () => {
+    // Ideally user shouldn't be warned HERE but when they leave.
     window.location.href = 'game.html?role=host';
 });
 
