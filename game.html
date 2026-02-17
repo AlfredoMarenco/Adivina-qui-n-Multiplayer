@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adivina Quién - Game</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Confetti Library -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- PeerJS Library -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+
+<body>
+
+    <div class="game-container">
+        <aside class="sidebar glass-panel">
+            <h2>Tu Pokémon</h2>
+            <div id="selectedPokemonCard" class="card placeholder-card">
+                <div class="placeholder-text">?</div>
+            </div>
+
+            <div id="game-controls">
+                <p id="statusText">Status: Connecting...</p>
+                <div id="hostIdDisplay" class="host-id-display" style="display:none;"></div>
+                <button id="btnMakeGuess" style="width:100%; display:none; background: #ff9800; margin-bottom: 10px;"
+                    class="neon-button">🏆 Make a Guess</button>
+            </div>
+
+            <div id="qa-controls" style="display:none;" class="qa-panel glass-panel">
+                <h4>Ask a Question</h4>
+                <select id="questionTypeSelect">
+                    <option value="type">Type</option>
+                    <option value="color">Color</option>
+                    <option value="stage">Stage</option>
+                </select>
+                <select id="questionValueSelect">
+                    <!-- Populated by JS -->
+                </select>
+                <button id="btnAskQuestion" class="neon-button">Ask</button>
+            </div>
+
+            <div id="chat-container" class="chat-box glass-panel" style="display:none;">
+                <div id="chatHistory" class="chat-history"></div>
+                <input type="text" id="chatInput" placeholder="Chat..." autocomplete="off">
+                <button id="btnSendChat">Send</button>
+            </div>
+
+            <button id="btnExit" class="menu-btn" style="margin-top: auto; background: #444;">Exit Game</button>
+        </aside>
+
+        <main class="grid-wrapper">
+            <div class="grid" id="pokemonGrid">
+                <!-- Las cartas se generarán aquí mediante JS -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Answer Modal -->
+    <div id="answerModal" class="modal" style="display:none;">
+        <div class="modal-content glass-panel">
+            <h3 id="modalQuestionText">Opponent asks: Is it Fire?</h3>
+            <div class="modal-buttons">
+                <button id="btnAnswerYes" class="btn-yes neon-button">YES</button>
+                <button id="btnAnswerNo" class="btn-no neon-button">NO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Guess Modal -->
+    <div id="guessModal" class="modal" style="display:none;">
+        <div class="modal-content glass-panel">
+            <h3>Make a Final Guess</h3>
+            <p>If you get it wrong, you don't lose instantly, but be careful!</p>
+            <select id="guessPokemonSelect" class="styled-select">
+                <!-- Populated by JS -->
+            </select>
+            <div class="modal-buttons">
+                <button id="btnConfirmGuess" class="btn-yes neon-button">GUESS</button>
+                <button id="btnCancelGuess" class="btn-no neon-button" style="background: #555;">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Waiting Modal (Host) -->
+    <div id="waitingModal" class="modal" style="display:none;">
+        <div class="modal-content glass-panel">
+            <h3>Waiting for Opponent</h3>
+            <p>Share this Game ID with your friend:</p>
+            <div id="waitingHostId" class="host-id-display" style="font-size: 1.2rem; padding: 15px;">Generating...
+            </div>
+            <p style="font-size: 0.9rem; color: #aaa;">Click ID to copy</p>
+            <button id="btnCancelHost" class="btn-no" style="margin-top: 20px;">Cancel</button>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+
+</html>

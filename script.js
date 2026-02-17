@@ -14,6 +14,8 @@ let conn = null;
 let myPeerId = null;
 let isHost = false;
 let isOpponentReady = false;
+let isMyTurn = true; // Host starts? We'll handle this. P2P usually requires explicit turn syncing or just "honor system" but we enforce it now.
+let canAsk = true;
 
 
 
@@ -135,10 +137,45 @@ function selectPokemon(name) {
         appendChatMessage("System", "You selected your Pokémon. Waiting for opponent...");
 
         if (isOpponentReady) {
-            appendChatMessage("System", "Both players ready! Start guessing!");
+            startMultiplayerGame();
         }
+    } else {
+        // Single player mode (just close menu if open, though usually not open here)
+        gameState = "PLAYING";
+    }
+}
+
+function startMultiplayerGame() {
+    gameState = "PLAYING";
+    appendChatMessage("System", "Both players ready! Start guessing!");
+
+    // Determine who goes first based on PeerID alphanumeric comparison to keep it deterministic but fair-ish
+    // Or just Host goes first. Let's say Host goes first.
+    if (isHost) {
+        isMyTurn = true;
+        canAsk = true;
+        appendChatMessage("System", "You go first!");
+    } else {
+        isMyTurn = false;
+        canAsk = false;
+        appendChatMessage("System", "Opponent goes first.");
+        disableAskControls();
     }
 
+    // Show Guess Button
+    document.getElementById("btnMakeGuess").style.display = "block";
+}
+
+function disableAskControls() {
+    btnAskQuestion.disabled = true;
+    btnAskQuestion.style.opacity = "0.5";
+    btnAskQuestion.textContent = "Waiting for Opponent...";
+}
+
+function enableAskControls() {
+    btnAskQuestion.disabled = false;
+    btnAskQuestion.style.opacity = "1";
+    btnAskQuestion.textContent = "Ask";
 }
 
 // Event Listeners
@@ -285,18 +322,65 @@ function handleData(data) {
         isOpponentReady = true;
         appendChatMessage("System", "Opponent is ready!");
         if (gameState === "PLAYING") {
-            appendChatMessage("System", "Both players ready! Start guessing!");
+            startMultiplayerGame();
         }
     }
     if (data.type === 'QUESTION') {
         showAnswerModal(data.text);
         appendChatMessage("Opponent", "Asked: " + data.text);
+        // Opponent asked, so it's my turn to answer. My interactions are blocked by modal.
     }
     if (data.type === 'ANSWER') {
         appendChatMessage("Opponent", "Answered: " + data.response + " (to: " + data.originalQuestion + ")");
-    }
+        // Opponent answered, now it's opponent's turn to ask? Or does Asking consume turn?
+        // Usually asking consumes turn. So if I asked and got answer, now it's Opponent's turn.
+        // Wait, "I can't ask until opponent answers". Once they answer, is it still my turn? 
+        // Classic Guess Who: You ask, you get answer, you eliminate, then turn ends.
 
+        // Simplification for this logic: You can ask ONE question. Then you must wait for answer.
+        // After answer, turn passes? Or keep asking? 
+        // User said: "no puedo preguntar hasta que el oponente responda". 
+        // This implies I am blocked *pending answer*. It doesn't explicitly say turn passes.
+        // But standard game implies turn passing. 
+        // Let's implement: I ask -> blocked. Opponent answers -> I receive answer -> Turn Ends -> Opponent's Turn.
+
+        endTurn();
+    }
+    if (data.type === 'TURN_PASS') {
+        isMyTurn = true;
+        canAsk = true;
+        enableAskControls();
+        appendChatMessage("System", "Your Turn!");
+    }
+    if (data.type === 'GUESS') {
+        handleOpponentGuess(data.pokemon);
+    }
+    if (data.type === 'CORRECT_GUESS') {
+        confetti({
+            particleCount: 150,
+            spread: 70,
+            origin: { y: 0.6 }
+        });
+        setTimeout(() => alert("YOU WIN! You guessed correctly!"), 500);
+        gameState = "FINISHED";
+    }
+    if (data.type === 'LOSE') {
+        appendChatMessage("System", "Your guess " + data.pokemon + " was WRONG. Turn passes.");
+        endTurn(); // If I guessed wrong, I lose my turn (or game continues)
+    }
 }
+
+function endTurn() {
+    canAsk = false;
+    disableAskControls();
+    conn.send({ type: 'TURN_PASS' }); // Explicitly pass turn
+    appendChatMessage("System", "Turn over. Opponent's turn.");
+}
+
+// Add handling for TURN_PASS in handleData logic above? 
+// No, let's add it now.
+// We need to insert it into the handleData function. 
+// Since we are replacing the block, we can just add it.
 
 // Chat Functions
 function appendChatMessage(sender, message) {
@@ -364,6 +448,11 @@ btnAskQuestion.addEventListener("click", () => {
         alert("Not connected!");
         return;
     }
+    if (!canAsk) {
+        alert("Wait for your turn or opponent's answer!");
+        return;
+    }
+
     const type = questionTypeSelect.value;
     const val = questionValueSelect.value;
     const category = type === "type" ? "Type" : (type === "color" ? "Color" : "Evolution");
@@ -372,6 +461,9 @@ btnAskQuestion.addEventListener("click", () => {
 
     conn.send({ type: 'QUESTION', text: questionText });
     appendChatMessage("You", "Asked: " + questionText);
+
+    canAsk = false;
+    disableAskControls();
 });
 
 let currentIncomingQuestion = "";
@@ -394,6 +486,133 @@ function sendAnswer(response) {
     });
     appendChatMessage("You", "Answered: " + response);
     answerModal.style.display = "none";
+}
+
+
+// Main Menu Logic
+const mainMenu = document.getElementById("mainMenu");
+const btnMenuSingle = document.getElementById("btnMenuSingle");
+const btnMenuHost = document.getElementById("btnMenuHost");
+const btnMenuJoin = document.getElementById("btnMenuJoin");
+const menuJoinSection = document.getElementById("menuJoinSection");
+const menuHostSection = document.getElementById("menuHostSection");
+const menuJoinInput = document.getElementById("menuJoinInput");
+const btnMenuJoinConfirm = document.getElementById("btnMenuJoinConfirm");
+const btnMenuBack = document.getElementById("btnMenuBack");
+const btnMenuHostBack = document.getElementById("btnMenuHostBack");
+const menuHostIdDisplay = document.getElementById("menuHostIdDisplay");
+
+btnMenuSingle.addEventListener('click', () => {
+    mainMenu.style.display = 'none';
+    // Single player setup
+    initGame(Math.floor(Math.random() * 1000000));
+});
+
+btnMenuHost.addEventListener('click', () => {
+    btnMenuSingle.style.display = 'none';
+    btnMenuHost.style.display = 'none';
+    btnMenuJoin.style.display = 'none';
+    menuHostSection.style.display = 'block';
+
+    if (!peer) initPeer();
+    if (myPeerId) {
+        menuHostIdDisplay.textContent = myPeerId;
+    } else {
+        peer.on('open', (id) => {
+            menuHostIdDisplay.textContent = id;
+        });
+    }
+});
+
+btnMenuHostBack.addEventListener('click', resetMenu);
+btnMenuBack.addEventListener('click', resetMenu);
+
+function resetMenu() {
+    menuJoinSection.style.display = 'none';
+    menuHostSection.style.display = 'none';
+    btnMenuSingle.style.display = 'block';
+    btnMenuHost.style.display = 'block';
+    btnMenuJoin.style.display = 'block';
+}
+
+btnMenuJoin.addEventListener('click', () => {
+    btnMenuSingle.style.display = 'none';
+    btnMenuHost.style.display = 'none';
+    btnMenuJoin.style.display = 'none';
+    menuJoinSection.style.display = 'block';
+});
+
+btnMenuJoinConfirm.addEventListener('click', () => {
+    const id = menuJoinInput.value.trim();
+    if (id) {
+        if (!peer) initPeer();
+        // Give peer a moment if initializing
+        if (peer.id) {
+            connectToPeer(id);
+            mainMenu.style.display = 'none';
+        } else {
+            peer.on('open', () => {
+                connectToPeer(id);
+                mainMenu.style.display = 'none';
+            });
+        }
+    }
+});
+
+// Guessing Logic
+const btnMakeGuess = document.getElementById("btnMakeGuess");
+const guessModal = document.getElementById("guessModal");
+const guessPokemonSelect = document.getElementById("guessPokemonSelect");
+const btnConfirmGuess = document.getElementById("btnConfirmGuess");
+const btnCancelGuess = document.getElementById("btnCancelGuess");
+
+btnMakeGuess.addEventListener('click', () => {
+    // Populate select with all pokemon (or just remaining? all is easier)
+    guessPokemonSelect.innerHTML = "";
+    allPokemonNames.sort().forEach(name => { // Sort for easier finding
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        guessPokemonSelect.appendChild(option);
+    });
+    guessModal.style.display = "block";
+});
+
+btnCancelGuess.addEventListener('click', () => {
+    guessModal.style.display = "none";
+});
+
+btnConfirmGuess.addEventListener('click', () => {
+    const guess = guessPokemonSelect.value;
+    if (conn) {
+        conn.send({ type: 'GUESS', pokemon: guess });
+        appendChatMessage("You", "Guessed: " + guess);
+        guessModal.style.display = "none";
+    }
+});
+
+function handleOpponentGuess(guessedName) {
+    // Check if guessedName matches my selected pokemon
+    // We need to know my selected pokemon. 
+    // We can infer it from the DOM or save it in a var.
+    // Let's save it in a var when selecting.
+
+    // Quick hack: get from sidebar
+    const myPokemonName = selectedPokemonCard.querySelector('.name').textContent.toLowerCase();
+
+    if (guessedName.toLowerCase() === myPokemonName) {
+        conn.send({ type: 'CORRECT_GUESS' });
+        alert("You Lost! Opponent guessed " + guessedName);
+        gameState = "FINISHED";
+    } else {
+        conn.send({ type: 'LOSE', pokemon: guessedName });
+        appendChatMessage("System", "Opponent guessed " + guessedName + " - WRONG!");
+        // Maybe turn passes to me?
+        isMyTurn = true;
+        canAsk = true;
+        enableAskControls();
+        appendChatMessage("System", "Your Turn!");
+    }
 }
 
 

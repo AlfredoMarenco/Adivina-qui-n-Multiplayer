@@ -4,98 +4,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Adivina Quién - Pokémon</title>
+    <title>Adivina Quién - Menu</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
-<body>
+<body class="menu-body">
 
-    <h1>Adivina Quién</h1>
+    <div class="main-menu-container glass-panel">
+        <h1 class="title-glitch">POKÉ<br>WHO?</h1>
 
-    <div class="controls-container">
-        <label for="seedInput">Seed:</label>
-        <input type="text" id="seedInput" placeholder="Enter Seed">
-        <button id="btnLoad">Cargar</button>
-        <button id="btnRandom">Aleatorio</button>
-        <span id="currentSeedDisplay"></span>
-        <button id="btnCopy" title="Copiar Seed">📋</button>
-    </div>
+        <div class="menu-options">
+            <button id="btnSingle" class="menu-btn neon-button">Single Player</button>
+            <button id="btnHost" class="menu-btn neon-button">Host Game</button>
+            <button id="btnJoin" class="menu-btn neon-button">Join Game</button>
+        </div>
 
-    <div class="game-container">
-        <aside class="sidebar">
-            <h2>Tu Pokémon</h2>
-            <div id="selectedPokemonCard" class="card placeholder-card">
-                <div class="placeholder-text">?</div>
+        <div id="joinSection" class="slide-panel" style="display:none;">
+            <input type="text" id="joinIdInput" placeholder="Paste Game ID Here" class="styled-input">
+            <div class="button-row">
+                <button id="btnJoinConfirm" class="neon-button">Connect</button>
+                <button id="btnJoinBack" class="secondary-btn">Back</button>
             </div>
+        </div>
 
-            <div id="multiplayer-controls" class="multiplayer-panel">
-                <h3>Multiplayer</h3>
-                <div id="connection-setup">
-                    <button id="btnHost">Host Game</button>
-                    <div class="join-container">
-                        <input type="text" id="joinInput" placeholder="Enter Game ID">
-                        <button id="btnJoin">Join</button>
-                    </div>
-                    <p id="statusText">Status: Offline</p>
-                    <div id="hostIdDisplay" class="host-id-display" style="display:none;"></div>
-                </div>
-
-                <div id="qa-controls" style="display:none;" class="qa-panel">
-                    <h4>Ask a Question</h4>
-                    <select id="questionTypeSelect">
-                        <option value="type">Type</option>
-                        <option value="color">Color</option>
-                        <option value="stage">Stage</option>
-                    </select>
-                    <select id="questionValueSelect">
-                        <!-- Populated by JS -->
-                    </select>
-                    <button id="btnAskQuestion">Ask</button>
-                </div>
-
-
-                <div id="game-status" style="display:none;">
-                    <p id="turnIndicator">Waiting for game to start...</p>
-                </div>
-
-                <div id="chat-container" class="chat-box" style="display:none;">
-                    <div id="chatHistory" class="chat-history"></div>
-                    <input type="text" id="chatInput" placeholder="Ask a question...">
-                    <button id="btnSendChat">Send</button>
-                </div>
-            </div>
-        </aside>
-        <div class="grid" id="pokemonGrid">
-            <!-- Las cartas se generarán aquí mediante JS -->
+        <div class="footer-credits">
+            Multiplayer Edition
         </div>
     </div>
 
-    <!-- PeerJS Library -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <div class="background-animation"></div>
 
-    <!-- Answer Modal -->
-    <div id="answerModal" class="modal" style="display:none;">
-        <div class="modal-content">
-            <h3 id="modalQuestionText">Opponent asks: Is it Fire?</h3>
-            <div class="modal-buttons">
-                <button id="btnAnswerYes" class="btn-yes">YES</button>
-                <button id="btnAnswerNo" class="btn-no">NO</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Answer Modal -->
-    <div id="answerModal" class="modal" style="display:none;">
-        <div class="modal-content">
-            <h3 id="modalQuestionText">Opponent asks: Is it Fire?</h3>
-            <div class="modal-buttons">
-                <button id="btnAnswerYes" class="btn-yes">YES</button>
-                <button id="btnAnswerNo" class="btn-no">NO</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
+    <script src="menu.js"></script>
 </body>
 
 </html>
