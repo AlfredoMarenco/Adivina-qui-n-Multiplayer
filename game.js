@@ -53,13 +53,21 @@ function mulberry32(a) {
 }
 
 // Fetch all pokemon names only once
+// Fetch all pokemon names AND details
 async function fetchPokemonData() {
     try {
-        const response = await fetch('https://pokeapi.co/api/v2/pokemon?limit=150'); // Limit to Gen 1 for simplicity? Or 1000.
+        const response = await fetch('https://pokeapi.co/api/v2/pokemon?limit=151'); // Gen 1 (151)
         const data = await response.json();
-        allPokemonNames = data.results.map(p => p.name);
+        const results = data.results;
 
-        // Start Initialization Loop
+        // Note: Fetching details for all 151 might be slow. 
+        // Better strategy: Select random 30, THEN fetch details for those 30.
+        // But initGame needs the seed to select the SAME 30 for both players.
+        // So we must have the list of names valid.
+
+        allPokemonNames = results.map(p => p.name);
+
+        // We will fetch details during render/init to avoid initial lag
         init();
 
     } catch (error) {
@@ -68,6 +76,7 @@ async function fetchPokemonData() {
     }
 }
 
+// Init Logic
 function init() {
     const urlParams = new URLSearchParams(window.location.search);
     const role = urlParams.get('role');
@@ -76,19 +85,22 @@ function init() {
     if (role === 'single') {
         initGame(Math.floor(Math.random() * 1000000));
         statusText.textContent = "Modo: Un Jugador";
-        gameState = "SELECTING"; /* Logic for single player needs work or just selecting */
-        // For now, Single player just means you pick and that's it.
+        gameState = "SELECTING";
     } else if (role === 'host') {
         isHost = true;
-        initPeer(null); // Init as host
+        initPeer(null);
     } else if (role === 'join' && joinId) {
         isHost = false;
-        initPeer(joinId); // Init and connect
+        initPeer(joinId);
     } else {
         alert("Modo de juego inválido");
         window.location.href = 'index.html';
     }
 }
+
+let connections = []; // Array for Host to store all connections
+// conn is used for Joiner (single connection) OR for Host to reference a specific interaction? 
+// Better: Host uses 'connections', Joiner uses 'conn'.
 
 function initPeer(destId) {
     peer = new Peer();
@@ -105,14 +117,21 @@ function initPeer(destId) {
     });
 
     peer.on('connection', (c) => {
-        if (conn) { c.close(); return; }
-        conn = c;
-        setupConnection();
-        // If host, hide waiting modal
-        if (isHost) {
-            waitingModal.style.display = 'none';
-            statusText.textContent = "¡Conectado con Jugador!";
+        // HOST Logic: Accept multiple connections
+        if (!isHost) {
+            // If I am a Joiner, I shouldn't accept connections?
+            // Or maybe P2P Mesh? We are doing Star.
+            c.close();
+            return;
         }
+
+        connections.push(c);
+        setupHostConnection(c);
+
+        statusText.textContent = `Jugadores conectados: ${connections.length + 1}`; // +1 is Host
+
+        // Notify others?
+        broadcast({ type: 'CHAT', message: "Nuevo jugador se ha unido!" }, c);
     });
 
     peer.on('error', (err) => {
@@ -128,6 +147,27 @@ function showWaitingModal() {
         navigator.clipboard.writeText(myPeerId);
         alert("¡Copiado!");
     };
+
+    // Add Start Button for Host
+    let btnStart = document.getElementById("btnHostStartGame");
+    if (!btnStart) {
+        btnStart = document.createElement("button");
+        btnStart.id = "btnHostStartGame";
+        btnStart.textContent = "Iniciar Partida";
+        btnStart.className = "neon-button";
+        btnStart.style.marginTop = "15px";
+        btnStart.onclick = () => {
+            if (connections.length > 0) {
+                // Start Game Logic
+                waitingModal.style.display = 'none';
+                startMultiplayerGame(); // Host starts
+                broadcast({ type: 'START_GAME' });
+            } else {
+                alert("Esperando a que se unan jugadores...");
+            }
+        };
+        waitingModal.querySelector('.modal-content').appendChild(btnStart);
+    }
 }
 
 btnCancelHost.onclick = () => {
@@ -137,21 +177,48 @@ btnCancelHost.onclick = () => {
 function connectToPeer(destId) {
     statusText.textContent = "Conectando a " + destId + "...";
     conn = peer.connect(destId);
-    setupConnection();
+    setupJoinerConnection();
 }
 
-function setupConnection() {
+// HOST: Setup listeners for a client
+function setupHostConnection(c) {
+    c.on('open', () => {
+        // Send Seed to new player
+        if (currentSeed) {
+            c.send({ type: 'SEED', value: currentSeed });
+        }
+    });
+
+    c.on('data', (data) => {
+        // Host receives data.
+        // 1. Handle it locally
+        handleData(data, c);
+
+        // 2. Relay/Broadcast (Star Topology)
+        // If CHAT, send to everyone else
+        if (data.type === 'CHAT') {
+            broadcast(data, c);
+        }
+        // If Game Action (QUESTION, ANSWER, etc), logic might differ
+        // For now, simple relay for everything relevant
+        if (['QUESTION', 'ANSWER', 'GUESS', 'CORRECT_GUESS', 'LOSE'].includes(data.type)) {
+            broadcast(data, c);
+        }
+    });
+
+    c.on('close', () => {
+        connections = connections.filter(conn => conn !== c);
+        statusText.textContent = `Jugadores conectados: ${connections.length + 1}`;
+        broadcast({ type: 'CHAT', message: "Un jugador se ha desconectado." });
+    });
+}
+
+// JOINER: Setup listener for Host
+function setupJoinerConnection() {
     conn.on('open', () => {
         statusText.textContent = "¡Conectado!";
         chatContainer.style.display = 'flex';
         qaControls.style.display = 'block';
-
-        if (isHost) {
-            // Generate seed and send
-            const seed = Math.floor(Math.random() * 1000000);
-            initGame(seed);
-            conn.send({ type: 'SEED', value: seed });
-        }
     });
 
     conn.on('data', (data) => handleData(data));
@@ -162,26 +229,41 @@ function setupConnection() {
     });
 }
 
+function broadcast(data, excludeConn = null) {
+    connections.forEach(c => {
+        if (c !== excludeConn && c.open) {
+            c.send(data);
+        }
+    });
+}
+
+// Old setupConnection removed.
+
 function handleData(data) {
     if (data.type === 'SEED') {
         initGame(data.value);
     }
     if (data.type === 'CHAT') {
         appendChatMessage("Oponente", data.message);
+        // Could add notification sound here
     }
     if (data.type === 'READY') {
         isOpponentReady = true;
         appendChatMessage("Sistema", "¡El oponente está listo!");
-        if (gameState === "PLAYING") {
-            startMultiplayerGame();
-        }
+        if (gameState === "PLAYING") startMultiplayerGame();
     }
     if (data.type === 'QUESTION') {
+        currentIncomingQuestionData = data;
         showAnswerModal(data.text);
         appendChatMessage("Oponente", "Preguntó: " + data.text);
     }
     if (data.type === 'ANSWER') {
         appendChatMessage("Oponente", "Respondió: " + data.response + " (a: " + data.originalQuestion + ")");
+
+        if (data.category && data.value) {
+            applyAutoDiscard(data.category, data.value, data.response);
+        }
+
         endTurn();
     }
     if (data.type === 'TURN_PASS') {
@@ -204,9 +286,72 @@ function handleData(data) {
     }
 }
 
+function applyAutoDiscard(category, value, response) {
+    const isYes = response === "SÍ" || response === "YES";
+    const gridCards = document.querySelectorAll(".grid .card");
+    const targetValue = value.toLowerCase();
+
+    const colorMap = {
+        "Rojo": "red", "Azul": "blue", "Amarillo": "yellow", "Verde": "green",
+        "Negro": "black", "Marrón": "brown", "Morado": "purple", "Gris": "gray", "Blanco": "white", "Rosa": "pink"
+    };
+    const typeMap = {
+        "Fuego": "fire", "Agua": "water", "Planta": "grass", "Eléctrico": "electric", "Hielo": "ice",
+        "Lucha": "fighting", "Veneno": "poison", "Tierra": "ground", "Volador": "flying", "Psíquico": "psychic",
+        "Bicho": "bug", "Roca": "rock", "Fantasma": "ghost", "Dragón": "dragon", "Acero": "steel", "Siniestro": "dark", "Hada": "fairy"
+    };
+
+    const apiValue = category === "color" ? (colorMap[value] || targetValue) : (typeMap[value] || targetValue);
+
+    gridCards.forEach(card => {
+        if (card.classList.contains("defeated")) return;
+
+        let match = false;
+        if (category === "type") {
+            const types = JSON.parse(card.dataset.types || "[]");
+            match = types.includes(apiValue);
+        } else if (category === "color") {
+            const color = card.dataset.color || "";
+            match = color === apiValue;
+        }
+
+        if (isYes) {
+            if (!match) card.classList.add("defeated");
+        } else {
+            if (match) card.classList.add("defeated");
+        }
+    });
+}
+
+// Cache for pokemon details
+const pokemonDetails = {};
+
+async function getPokemonDetails(name) {
+    if (pokemonDetails[name]) return pokemonDetails[name];
+    try {
+        const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${name}`);
+        const data = await res.json();
+
+        // Get Species for Color
+        const resSpecies = await fetch(data.species.url);
+        const dataSpecies = await resSpecies.json();
+
+        const details = {
+            name: name,
+            types: data.types.map(t => t.type.name), // e.g., ["fire", "flying"]
+            color: dataSpecies.color.name, // e.g., "red"
+            sprite: data.sprites.front_default || `https://img.pokemondb.net/artwork/large/${name}.jpg`
+        };
+        pokemonDetails[name] = details;
+        return details;
+    } catch (e) {
+        console.error("Error fetching details for " + name, e);
+        return { name: name, types: [], color: "unknown" };
+    }
+}
+
 function initGame(seed) {
     currentSeed = seed;
-    // statusText.textContent += ` (Seed: ${seed})`; 
     gameState = "SELECTING";
     selectedPokemonCard.innerHTML = '<div class="placeholder-text">?</div>';
     selectedPokemonCard.className = "card placeholder-card";
@@ -222,24 +367,44 @@ function initGame(seed) {
     renderGrid(selectedPokemons);
 }
 
-function renderGrid(pokemons) {
+async function renderGrid(pokemons) {
     grid.innerHTML = "";
-    pokemons.forEach(name => {
+    // Render placeholders first? Or just render as we go? 
+    // Render basic cards first, then populate details asynchronously to feel fast.
+
+    for (const name of pokemons) {
         const card = document.createElement("div");
         card.classList.add("card");
+        card.dataset.name = name; // Store name for logic
 
-        const img = document.createElement("img");
-        img.src = `https://img.pokemondb.net/artwork/large/${name}.jpg`;
-        img.alt = name;
-        img.loading = "lazy";
-        img.onerror = function () { this.src = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/0.png"; };
+        // Initial state
+        card.innerHTML = `
+            <div class="loading-spinner">...</div>
+            <div class="name">${name}</div>
+        `;
+        grid.appendChild(card);
 
-        const label = document.createElement("div");
-        label.classList.add("name");
-        label.textContent = name.replace(/-/g, ' ');
+        // Fetch details
+        getPokemonDetails(name).then(details => {
+            // Store attributes in dataset for easy filtering
+            card.dataset.types = JSON.stringify(details.types);
+            card.dataset.color = details.color;
 
-        card.appendChild(img);
-        card.appendChild(label);
+            card.innerHTML = ""; // Clear loader
+
+            const img = document.createElement("img");
+            img.src = `https://img.pokemondb.net/artwork/large/${name}.jpg`;
+            img.alt = name;
+            img.loading = "lazy";
+            img.onerror = function () { this.src = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/0.png"; };
+
+            const label = document.createElement("div");
+            label.classList.add("name");
+            label.textContent = name.replace(/-/g, ' ');
+
+            card.appendChild(img);
+            card.appendChild(label);
+        });
 
         card.addEventListener("click", () => {
             if (gameState === "SELECTING") {
@@ -248,9 +413,7 @@ function renderGrid(pokemons) {
                 card.classList.toggle("defeated");
             }
         });
-
-        grid.appendChild(card);
-    });
+    }
 }
 
 function selectPokemon(name) {
@@ -345,9 +508,9 @@ function enableAskControls() {
     btnAskQuestion.textContent = "Preguntar";
 }
 
-let currentIncomingQuestion = "";
+let currentIncomingQuestionData = null;
+
 function showAnswerModal(question) {
-    currentIncomingQuestion = question;
     modalQuestionText.textContent = "El oponente pregunta: " + question;
     answerModal.style.display = "flex";
 }
@@ -356,7 +519,15 @@ btnAnswerNo.addEventListener("click", () => sendAnswer("NO"));
 
 function sendAnswer(response) {
     if (!conn) return;
-    conn.send({ type: 'ANSWER', response: response, originalQuestion: currentIncomingQuestion });
+
+    conn.send({
+        type: 'ANSWER',
+        response: response,
+        originalQuestion: currentIncomingQuestionData ? currentIncomingQuestionData.text : "",
+        category: currentIncomingQuestionData ? currentIncomingQuestionData.category : null,
+        value: currentIncomingQuestionData ? currentIncomingQuestionData.value : null
+    });
+
     appendChatMessage("Tú", "Respondiste: " + response);
     answerModal.style.display = "none";
 }
