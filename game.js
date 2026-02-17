@@ -289,9 +289,26 @@ function handleData(data) {
         // Could add notification sound here
     }
     if (data.type === 'READY') {
-        isOpponentReady = true;
-        appendChatMessage("Sistema", "¡El oponente está listo!");
-        if (gameState === "PLAYING") startMultiplayerGame();
+        appendChatMessage("Sistema", "¡Un jugador está listo!");
+
+        if (isHost) {
+            readyCount++;
+            const totalPlayers = connections.length + 1;
+
+            if (readyCount >= totalPlayers) {
+                broadcast({ type: 'START_GAME' });
+                startMultiplayerGame();
+
+                // Initialize Turn Cycle (Player 1 starts)
+                setTimeout(() => {
+                    const turnData = { type: 'NEXT_TURN', playerIndex: 1 };
+                    broadcast(turnData);
+                    handleData(turnData);
+                }, 1000);
+            } else {
+                appendChatMessage("Sistema", "Esperando a " + (totalPlayers - readyCount) + " jugadores más...");
+            }
+        }
     }
     if (data.type === 'QUESTION') {
         currentIncomingQuestionData = data;
