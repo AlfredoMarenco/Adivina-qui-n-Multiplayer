@@ -158,10 +158,10 @@ function showWaitingModal() {
         btnStart.style.marginTop = "15px";
         btnStart.onclick = () => {
             if (connections.length > 0) {
-                // Start Game Logic
+                // Close Lobby and Allow Selection
                 waitingModal.style.display = 'none';
-                startMultiplayerGame(); // Host starts
-                broadcast({ type: 'START_GAME' });
+                broadcast({ type: 'LOBBY_CLOSED' });
+                alert("¡Lobby cerrado! Selecciona tu personaje.");
             } else {
                 alert("Esperando a que se unan jugadores...");
             }
@@ -417,7 +417,8 @@ async function renderGrid(pokemons) {
 }
 
 function selectPokemon(name) {
-    gameState = "PLAYING";
+    // gameState = "PLAYING"; // Don't set PLAYING yet! Wait for all.
+    gameState = "WAITING_OTHERS";
 
     // Update Sidebar
     selectedPokemonCard.className = "card";
@@ -431,10 +432,20 @@ function selectPokemon(name) {
     selectedPokemonCard.appendChild(img);
     selectedPokemonCard.appendChild(label);
 
-    if (conn) {
-        conn.send({ type: 'READY' });
-        appendChatMessage("System", "You selected your Pokémon. Waiting for opponent...");
-        if (isOpponentReady) startMultiplayerGame();
+    if (conn || isHost) { // isHost check important if Host hasn't "connected" to self
+        // Send READY to others (or just process if Host)
+        if (isHost) {
+            readyCount++;
+            if (readyCount >= connections.length + 1) {
+                broadcast({ type: 'START_GAME' });
+                startMultiplayerGame();
+            } else {
+                appendChatMessage("Sistema", "Esperando a los demás jugadores...");
+            }
+        } else {
+            conn.send({ type: 'READY' });
+            appendChatMessage("Sistema", "Has seleccionado tu Pokémon. Esperando a los demás...");
+        }
     } else {
         // Single player
         document.getElementById("btnMakeGuess").style.display = "block";
