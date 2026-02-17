@@ -42,6 +42,10 @@ let isOpponentReady = false;
 let isMyTurn = false;
 let canAsk = false;
 
+// Turn Management (v2.3)
+let myPlayerIndex = 0; // Host = 1, Joiners = 2, 3, 4...
+let currentTurnPlayerIndex = 1;
+
 // Seeded Random Generator (Mulberry32)
 function mulberry32(a) {
     return function () {
@@ -113,6 +117,10 @@ function initPeer(destId) {
             // Generate seed and initialize Host's board immediately
             const seed = Math.floor(Math.random() * 1000000);
             initGame(seed);
+
+            myPlayerIndex = 1; // Host is always 1
+            statusText.textContent = "Eres el Anfitrión (Jugador 1)";
+
             showWaitingModal();
         } else if (destId) {
             connectToPeer(destId);
@@ -129,12 +137,20 @@ function initPeer(destId) {
         }
 
         connections.push(c);
+
+        // Assign Player ID (Host is 1, so first connection is 2)
+        const newPlayerIndex = connections.length + 1;
+        c.on('open', () => {
+            c.send({ type: 'ASSIGN_ID', id: newPlayerIndex });
+            if (currentSeed) c.send({ type: 'SEED', value: currentSeed });
+        });
+
         setupHostConnection(c);
 
         statusText.textContent = `Jugadores conectados: ${connections.length + 1}`; // +1 is Host
 
         // Notify others?
-        broadcast({ type: 'CHAT', message: "Nuevo jugador se ha unido!" }, c);
+        broadcast({ type: 'CHAT', message: "Nuevo jugador se ha unido (Jugador " + newPlayerIndex + ")!" }, c);
     });
 
     peer.on('error', (err) => {
@@ -269,11 +285,32 @@ function handleData(data) {
 
         endTurn();
     }
+    if (data.type === 'ASSIGN_ID') {
+        myPlayerIndex = data.id;
+        console.log("My Player Index: " + myPlayerIndex);
+        statusText.textContent = "Conectado como Jugador " + myPlayerIndex;
+    }
+    if (data.type === 'NEXT_TURN') {
+        currentTurnPlayerIndex = data.playerIndex;
+
+        if (currentTurnPlayerIndex === myPlayerIndex) {
+            isMyTurn = true;
+            canAsk = true;
+            enableAskControls();
+            appendChatMessage("Sistema", "¡ES TU TURNO!");
+            // Browser notification?
+        } else {
+            isMyTurn = false;
+            canAsk = false;
+            disableAskControls();
+            appendChatMessage("Sistema", "Turno del Jugador " + currentTurnPlayerIndex);
+        }
+    }
     if (data.type === 'TURN_PASS') {
-        isMyTurn = true;
-        canAsk = true;
-        enableAskControls();
-        appendChatMessage("Sistema", "¡Tu Turno!");
+        // Only Host handles TURN_PASS to calculate next turn
+        if (isHost) {
+            advanceTurn();
+        }
     }
     if (data.type === 'GUESS') {
         handleOpponentGuess(data.pokemon);
@@ -442,6 +479,15 @@ function selectPokemon(name) {
             if (readyCount >= connections.length + 1) {
                 broadcast({ type: 'START_GAME' });
                 startMultiplayerGame();
+
+                // Initialize Turn Cycle (Player 1 starts)
+                // Wait slightly to ensure START_GAME is processed
+                setTimeout(() => {
+                    const turnData = { type: 'NEXT_TURN', playerIndex: 1 }; // Always start with Host (P1)
+                    broadcast(turnData);
+                    handleData(turnData);
+                }, 1000);
+
             } else {
                 appendChatMessage("Sistema", "Esperando a los demás jugadores...");
             }
@@ -496,16 +542,35 @@ questionTypeSelect.addEventListener("change", updateQuestionValues);
 updateQuestionValues();
 
 btnAskQuestion.addEventListener("click", () => {
-    if (!conn) { alert("Not connected!"); return; }
-    if (!canAsk) { alert("Wait for your turn!"); return; }
+    if (!conn && !isHost) { alert("¡No estás conectado!"); return; }
+    if (!canAsk) { alert("¡Espera tu turno!"); return; }
 
     const type = questionTypeSelect.value;
     const val = questionValueSelect.value;
     const category = type === "type" ? "Type" : (type === "color" ? "Color" : "Evolution");
     const questionText = `Is it ${val} ${category}?`;
 
-    conn.send({ type: 'QUESTION', text: questionText });
-    appendChatMessage("You", "Asked: " + questionText);
+    const qData = { type: 'QUESTION', text: questionText, category: type, value: questionValueSelect.value }; // Use raw value? No send logic is below. Wait.
+    // Replicating logic from before but fixing the send.
+
+    // Fix: We need to send structured data as per my previous fix.
+    // Oh wait, line 507 was `conn.send`.
+
+    const sendData = {
+        type: 'QUESTION',
+        text: questionText,
+        category: type,
+        value: val // English value
+    };
+
+    if (isHost) {
+        broadcast(sendData);
+        // Host doesn't need to handle QUESTION for self (as answerer), but for chat log yes.
+    } else {
+        conn.send(sendData);
+    }
+
+    appendChatMessage("Tú", "Preguntaste: " + questionText);
 
     canAsk = false;
     disableAskControls();
@@ -532,15 +597,25 @@ btnAnswerYes.addEventListener("click", () => sendAnswer("SÍ"));
 btnAnswerNo.addEventListener("click", () => sendAnswer("NO"));
 
 function sendAnswer(response) {
-    if (!conn) return;
+    if (!conn && !isHost) return;
 
-    conn.send({
+    const answerData = {
         type: 'ANSWER',
         response: response,
         originalQuestion: currentIncomingQuestionData ? currentIncomingQuestionData.text : "",
         category: currentIncomingQuestionData ? currentIncomingQuestionData.category : null,
         value: currentIncomingQuestionData ? currentIncomingQuestionData.value : null
-    });
+    };
+
+    if (isHost) {
+        broadcast(answerData); // Host broadcasts answer to all
+        // Also apply auto-discard for Host self?
+        if (answerData.category && answerData.value) {
+            applyAutoDiscard(answerData.category, answerData.value, answerData.response);
+        }
+    } else {
+        conn.send(answerData);
+    }
 
     appendChatMessage("Tú", "Respondiste: " + response);
     answerModal.style.display = "none";
@@ -549,8 +624,31 @@ function sendAnswer(response) {
 function endTurn() {
     canAsk = false;
     disableAskControls();
-    conn.send({ type: 'TURN_PASS' });
-    appendChatMessage("Sistema", "Fin del turno. Turno del oponente.");
+
+    if (isHost) {
+        // If Host ends turn, they advance it directly
+        advanceTurn();
+    } else {
+        // Joiner sends request to Host
+        conn.send({ type: 'TURN_PASS' });
+    }
+    // appendChatMessage("Sistema", "Fin del turno."); // Handled by NEXT_TURN broadcast
+}
+
+function advanceTurn() {
+    if (!isHost) return;
+
+    // Cycle turns: 1 -> 2 -> ... -> N -> 1
+    const totalPlayers = connections.length + 1;
+    currentTurnPlayerIndex++;
+    if (currentTurnPlayerIndex > totalPlayers) {
+        currentTurnPlayerIndex = 1;
+    }
+
+    // Broadcast new turn
+    const turnData = { type: 'NEXT_TURN', playerIndex: currentTurnPlayerIndex };
+    broadcast(turnData);
+    handleData(turnData); // Host handles it for self
 }
 
 // Guessing Logic
@@ -567,8 +665,12 @@ btnMakeGuess.addEventListener('click', () => {
 btnCancelGuess.addEventListener('click', () => guessModal.style.display = "none");
 btnConfirmGuess.addEventListener('click', () => {
     const guess = guessPokemonSelect.value;
-    if (conn) {
-        conn.send({ type: 'GUESS', pokemon: guess });
+    if (conn || isHost) {
+        const guessData = { type: 'GUESS', pokemon: guess };
+
+        if (isHost) broadcast(guessData);
+        else conn.send(guessData);
+
         appendChatMessage("Tú", "Adivinaste: " + guess);
         guessModal.style.display = "none";
     }
@@ -605,8 +707,18 @@ btnSendChat.addEventListener('click', sendChat);
 chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() {
     const text = chatInput.value.trim();
-    if (!text || !conn) return;
-    conn.send({ type: 'CHAT', message: text });
+    if (!text) return;
+
+    const msgData = { type: 'CHAT', message: text };
+
+    if (isHost) {
+        broadcast(msgData);
+    } else if (conn) {
+        conn.send(msgData);
+    } else {
+        return;
+    }
+
     appendChatMessage("Tú", text);
     chatInput.value = "";
 }
